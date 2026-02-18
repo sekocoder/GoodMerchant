@@ -1,42 +1,35 @@
 package com.example.goodmerchant
 
+import android.Manifest
 import android.app.Activity.RESULT_OK
-import android.app.ProgressDialog
-import android.content.ContentProvider
-import android.content.ContentResolver
-import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.provider.MediaStore
-import android.util.Base64
 import android.util.Log
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.navigation.findNavController
 import androidx.navigation.fragment.findNavController
-import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.ViewModelProvider
-import androidx.navigation.Navigation
 import com.example.goodmerchant.Recyclerview.ListFragmentDirections
 import com.example.goodmerchant.Retrofit.*
 import com.example.goodmerchant.ViewModel.productViewmodel
 import com.example.goodmerchant.databinding.FragmentMainBinding
-
-import com.google.mlkit.common.model.LocalModel
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.label.ImageLabeling
 import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
-import kotlinx.android.synthetic.main.fragment_main.*
-import kotlinx.android.synthetic.main.splash.*
 import kotlinx.coroutines.*
 import okhttp3.MediaType
 import okhttp3.MultipartBody
@@ -66,6 +59,21 @@ class MainFragment : Fragment() {
     lateinit var binding: FragmentMainBinding
     lateinit var imageLink: URL
     lateinit var imageTag: String
+
+    private val requestCameraPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) pickImagecam()
+        else Toast.makeText(requireContext(), "Camera permission required", Toast.LENGTH_SHORT).show()
+    }
+
+    private val requestStoragePermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (permissions.values.any { it }) pickImage()
+        else Toast.makeText(requireContext(), "Storage permission required to pick image", Toast.LENGTH_SHORT).show()
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
@@ -124,14 +132,24 @@ class MainFragment : Fragment() {
         }
 
         binding.camera.setOnClickListener {
-                ch = 1
-                pickImagecam()
-
+            ch = 1
+            when {
+                ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED ->
+                    pickImagecam()
+                else -> requestCameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            }
         }
         binding.gallery.setOnClickListener {
-                ch = 2
-                pickImage()
-
+            ch = 2
+            val storagePermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                Manifest.permission.READ_MEDIA_IMAGES
+            else
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            when {
+                ContextCompat.checkSelfPermission(requireContext(), storagePermission) == PackageManager.PERMISSION_GRANTED ->
+                    pickImage()
+                else -> requestStoragePermissionLauncher.launch(arrayOf(storagePermission))
+            }
         }
 
         return binding.root
@@ -229,21 +247,18 @@ class MainFragment : Fragment() {
                     val image = InputImage.fromBitmap(it, 0)
                     recognizer.process(image)
                         .addOnSuccessListener { labels ->
-
-                            if(labels[0].text!= "") {
-
-                                fillListfragment(labels[0].text)
-
+                            val firstLabel = labels.firstOrNull()?.text
+                            if (!firstLabel.isNullOrBlank()) {
+                                fillListfragment(firstLabel)
                                 Toast.makeText(
                                     requireActivity(),
-                                    labels[0].text,
+                                    firstLabel,
                                     Toast.LENGTH_LONG
                                 ).show()
-                            }
-                            else{
+                            } else {
                                 Toast.makeText(
                                     requireActivity(),
-                                    "Retry",
+                                    "No labels found. Try another image or use text search.",
                                     Toast.LENGTH_SHORT
                                 ).show()
                             }
@@ -272,11 +287,13 @@ class MainFragment : Fragment() {
     //URI to bitmap
     @Throws(IOException::class)
     private fun getBitmapFromUri(uri: Uri): Bitmap? {
-        val parcelFileDescriptor = activity?.contentResolver?.openFileDescriptor(uri, "r")
-        val fileDescriptor: FileDescriptor = parcelFileDescriptor!!.fileDescriptor
-        val image = BitmapFactory.decodeFileDescriptor(fileDescriptor)
-        parcelFileDescriptor.close()
-        return image
+        val parcelFileDescriptor = activity?.contentResolver?.openFileDescriptor(uri, "r") ?: return null
+        return try {
+            val image = BitmapFactory.decodeFileDescriptor(parcelFileDescriptor.fileDescriptor)
+            image
+        } finally {
+            parcelFileDescriptor.close()
+        }
     }
 
     fun fillListfragment(tag: String) {

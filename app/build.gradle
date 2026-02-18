@@ -1,18 +1,19 @@
 plugins {
     id 'com.android.application'
     id 'kotlin-android'
+    id 'kotlin-parcelize'
     id "androidx.navigation.safeargs"
-    id 'kotlin-android-extensions'
     id 'com.google.gms.google-services'
 }
 
 android {
-    compileSdk 31
+    namespace 'com.example.goodmerchant'
+    compileSdk 34
 
     defaultConfig {
         applicationId "com.example.goodmerchant"
         minSdk 21
-        targetSdk 31
+        targetSdk 34
         versionCode 1
         versionName "1.0"
 
